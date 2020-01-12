@@ -1,7 +1,5 @@
 # 原始碼說明文件
 
-=============
-
 `moresong.py`: Python程式碼，用於歌詞爬蟲及資料清理。
 
 `moresong2.py`: Python程式碼，`moresong.py`的可中斷版。
