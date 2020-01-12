@@ -1,0 +1,130 @@
+---
+title: "songs"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+library(jiebaR)
+library(stringr)
+
+# Get txt file paths
+fps_m <- list.files('male', full.names = T)
+fps_f <- list.files('female', full.names = T)
+
+# Initialize jiebaR
+seg <- worker()
+
+# determining song names
+name_m <- vector('character', length(fps_m))
+
+for (i in seq_along(fps_m)) {
+  name_m[i] <- basename(fps_m[i])
+}
+
+name_f <- vector('character', length(fps_f))
+
+for (i in seq_along(fps_f)) {
+  name_f[i] <- basename(fps_f[i])
+}
+
+# determining lyrics
+lyric_m <- vector('character', length(fps_m))
+
+for (i in seq_along(fps_m)) {
+  l_m <- readLines(fps_m[i], encoding = 'UTF-8') %>% str_squish()
+  segged_m <- segment(l_m, seg)
+  lyric_m[i] <- paste0(segged_m, collapse = ' ')
+}
+
+lyric_f <- vector('character', length(fps_f))
+
+for (i in seq_along(fps_f)) {
+  l_f <- readLines(fps_f[i], encoding = 'UTF-8') %>% str_squish()
+  segged_f <- segment(l_f, seg)
+  lyric_f[i] <- paste0(segged_f, collapse = ' ')
+}
+
+# Combine results into dfs
+male_df <- tibble::tibble(編號 = seq_along(fps_m), 性別 = '男', 歌名 = name_m, 歌詞 = lyric_m)
+female_df <- tibble::tibble(編號 = seq_along(fps_f), 性別 = '女', 歌名 = name_f, 歌詞 = lyric_f)
+
+```
+
+```{r message=FALSE, warning=FALSE}
+library(tidytext)
+library(dplyr)
+library(readxl)
+library(readr)
+
+stopwords <- read_excel('ch_stop_words.xlsx')
+stop_words <- read_csv("stop_words.txt", col_names = FALSE)
+
+tidy_male <- male_df %>%
+  unnest_tokens(output = '用詞', input = '歌詞', token = 'regex', pattern = ' ') %>%
+  anti_join(stop_words, by = c('用詞' = 'X1'))
+  
+freq_male <- tidy_male %>% 
+  group_by(用詞) %>% 
+  summarize(個數 = n()) %>%
+  arrange(desc(個數)) %>%
+  print()
+
+tidy_female <- female_df %>%
+  unnest_tokens(output = '用詞', input = '歌詞', token = 'regex', pattern = ' ') %>%
+  anti_join(stop_words, by = c('用詞' = 'X1'))
+
+freq_female <- tidy_female %>% 
+  group_by(用詞) %>%
+  summarize(個數 = n()) %>%
+  arrange(desc(個數)) %>%
+  print()
+```
+
+```{r message=FALSE}
+library(ggplot2)
+freq_male %>%
+  top_n(20, 個數) %>%
+  ggplot() +
+    geom_bar(aes(reorder(用詞, +個數), 個數), stat = 'identity') +
+    coord_flip() +
+    labs(title = '男歌手高頻用詞')
+
+freq_female %>%
+  top_n(20, 個數) %>%
+  ggplot() +
+    geom_bar(aes(reorder(用詞, +個數), 個數), stat = 'identity') +
+    coord_flip() +
+    labs(title = '女歌手高頻用詞')
+```
+
+```{r message=FALSE, warning=FALSE}
+library(wordcloud2)
+library(webshot)
+webshot::install_phantomjs()
+library("htmlwidgets")
+
+wordcloud_m <- wordcloud2(freq_male, shape = 'star')
+
+saveWidget(wordcloud_m, 'male.html', selfcontained = F)
+webshot('male.html', 'male.png', delay = 5)
+
+```
+
+
+
+```{r message=FALSE}
+wordcloud_f <- wordcloud2(freq_female, shape = 'star')
+
+saveWidget(wordcloud_f, 'female.html', selfcontained = F)
+webshot('female.html', 'female.png', delay = 5)
+
+```
+
+
+
+

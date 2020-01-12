@@ -1,0 +1,207 @@
+---
+title: "songs"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
+library(jiebaR)
+library(stringr)
+
+# Get txt file paths
+fps_m <- list.files('male', full.names = T)
+fps_f <- list.files('female', full.names = T)
+
+# Initialize jiebaR
+seg <- worker()
+
+# determining song names
+name_m <- vector('character', length(fps_m))
+
+for (i in seq_along(fps_m)) {
+  name_m[i] <- basename(fps_m[i])
+}
+
+name_f <- vector('character', length(fps_f))
+
+for (i in seq_along(fps_f)) {
+  name_f[i] <- basename(fps_f[i])
+}
+
+# determining lyrics
+lyric_m <- vector('character', length(fps_m))
+
+for (i in seq_along(fps_m)) {
+  l_m <- readLines(fps_m[i], encoding = 'UTF-8') %>% str_squish()
+  segged_m <- segment(l_m, seg)
+  lyric_m[i] <- paste0(segged_m, collapse = ' ')
+}
+
+lyric_f <- vector('character', length(fps_f))
+
+for (i in seq_along(fps_f)) {
+  l_f <- readLines(fps_f[i], encoding = 'UTF-8') %>% str_squish()
+  segged_f <- segment(l_f, seg)
+  lyric_f[i] <- paste0(segged_f, collapse = ' ')
+}
+
+# Combine results into dfs
+male_df <- tibble::tibble(編號 = seq_along(fps_m), 性別 = '男', 歌名 = name_m, 歌詞 = lyric_m)
+female_df <- tibble::tibble(編號 = seq_along(fps_f), 性別 = '女', 歌名 = name_f, 歌詞 = lyric_f)
+
+```
+
+```{r message=FALSE}
+library(tidytext)
+library(dplyr)
+library(readxl)
+
+stopwords <- read_excel('ch_stop_words.xlsx')
+
+tidy_male <- male_df %>%
+  unnest_tokens(output = '用詞', input = '歌詞', token = 'regex', pattern = ' ') %>%
+  anti_join(get_stopwords(), by = c('用詞' = 'word')) %>%
+  anti_join(stopwords, by = c('用詞' = '停用詞'))
+  
+freq_male <- tidy_male %>% 
+  group_by(用詞) %>% 
+  summarize(個數 = n()) %>%
+  arrange(desc(個數)) %>%
+  print()
+
+tidy_female <- female_df %>%
+  unnest_tokens(output = '用詞', input = '歌詞', token = 'regex', pattern = ' ') %>%
+  anti_join(get_stopwords(), by = c('用詞' = 'word')) %>%
+  anti_join(stopwords, by = c('用詞' = '停用詞'))
+
+freq_female <- tidy_female %>% 
+  group_by(用詞) %>%
+  summarize(個數 = n()) %>%
+  arrange(desc(個數)) %>%
+  print()
+```
+
+```{r message=FALSE}
+library(ggplot2)
+freq_male %>%
+  top_n(20, 個數) %>%
+  ggplot() +
+    geom_bar(aes(用詞, 個數), stat = 'identity') +
+    coord_flip() +
+    labs(title = '男歌手高頻用詞')
+
+freq_female %>%
+  top_n(20, 個數) %>%
+  ggplot() +
+    geom_bar(aes(用詞, 個數), stat = 'identity') +
+    coord_flip() +
+    labs(title = '女歌手高頻用詞')
+```
+
+```{r message=FALSE, warning=FALSE}
+library(wordcloud2)
+library(webshot)
+webshot::install_phantomjs()
+library("htmlwidgets")
+
+wordcloud_m <- wordcloud2(freq_male, shape = 'star')
+
+saveWidget(wordcloud_m, 'male.html', selfcontained = F)
+webshot('male.html', 'male.png', delay = 5)
+
+```
+
+
+
+```{r message=FALSE}
+wordcloud_f <- wordcloud2(freq_female, shape = 'star')
+
+saveWidget(wordcloud_f, 'female.html', selfcontained = F)
+webshot('female.html', 'female.png', delay = 5)
+
+```
+
+
+```{r message=FALSE, warning=FALSE}
+library(quanteda)
+library(stm)
+library(ggplot2)
+
+tidy_both <- rbind(male_df, female_df) %>%
+  unnest_tokens(output = '用詞', input = '歌詞', token = 'regex', pattern = ' ') %>%
+  anti_join(get_stopwords(), by = c('用詞' = 'word')) %>%
+  anti_join(stopwords, by = c('用詞' = '停用詞'))
+
+dfm_both <- tidy_both %>% 
+  count(歌名, 用詞, sort = TRUE) %>%
+  cast_dfm(歌名, 用詞, n)
+
+dfm_male <- tidy_male %>% 
+  count(歌名, 用詞, sort = TRUE) %>%
+  cast_dfm(歌名, 用詞, n)
+
+dfm_female <- tidy_female %>% 
+  count(歌名, 用詞, sort = TRUE) %>%
+  cast_dfm(歌名, 用詞, n)
+
+topic_model_both <- stm(dfm_both, K = 6, verbose = FALSE, init.type = "Spectral")
+topic_model_male <- stm(dfm_male, K = 6, verbose = FALSE, init.type = "Spectral")
+topic_model_female <- stm(dfm_female, K = 6, verbose = FALSE, init.type = "Spectral")
+
+td_beta_both <- tidy(topic_model_both)
+
+td_beta_both %>%
+    group_by(topic) %>%
+    top_n(10, beta) %>%
+    ungroup() %>%
+    mutate(topic = paste0('主題 ', topic),
+           term = reorder_within(term, beta, topic)) %>%
+    ggplot(aes(term, beta, fill = as.factor(topic))) +
+    geom_col(alpha = 0.8, show.legend = FALSE) +
+    facet_wrap(~ topic, scales = "free_y") +
+    coord_flip() +
+    scale_x_reordered() +
+    labs(x = NULL, y = expression(beta), title = '各主題高頻用詞')
+
+
+
+```
+
+```{r}
+td_beta_male <- tidy(topic_model_male)
+
+td_beta_male %>%
+    group_by(topic) %>%
+    top_n(10, beta) %>%
+    ungroup() %>%
+    mutate(topic = paste0('主題 ', topic),
+           term = reorder_within(term, beta, topic)) %>%
+    ggplot(aes(term, beta, fill = as.factor(topic))) +
+    geom_col(alpha = 0.8, show.legend = FALSE) +
+    facet_wrap(~ topic, scales = "free_y") +
+    coord_flip() +
+    scale_x_reordered() +
+    labs(x = NULL, y = expression(beta), title = '男歌手各主題高頻用詞')
+```
+
+```{r}
+td_beta_female <- tidy(topic_model_female)
+
+td_beta_female %>%
+    group_by(topic) %>%
+    top_n(10, beta) %>%
+    ungroup() %>%
+    mutate(topic = paste0('主題 ', topic),
+           term = reorder_within(term, beta, topic)) %>%
+    ggplot(aes(term, beta, fill = as.factor(topic))) +
+    geom_col(alpha = 0.8, show.legend = FALSE) +
+    facet_wrap(~ topic, scales = "free_y") +
+    coord_flip() +
+    scale_x_reordered() +
+    labs(x = NULL, y = expression(beta), title = '女歌手各主題高頻用詞')
+```
+
